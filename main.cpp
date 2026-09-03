@@ -1,119 +1,80 @@
 #include <iostream>
 #include <Windows.h>
-#include <iomanip>
 #include <pdh.h>
 #include <vector>
 
-class CollectCPUData {
-    private:
 
-    ULARGE_INTEGER uli1;
-    ULARGE_INTEGER uli2;
-    ULARGE_INTEGER uli3;
-    FILETIME lpIdleTime;
-    FILETIME lpKernelTime;
-    FILETIME lpUserTime;
-
-    public: CollectCPUData() {CollectCPUInfo();};
-
-    void CollectCPUInfo() {
-    BOOL status1 = GetSystemTimes(&lpIdleTime,&lpKernelTime,&lpUserTime);
-
-    if (status1) {
-
-        uli1.LowPart  = lpIdleTime.dwLowDateTime;
-        uli1.HighPart = lpIdleTime.dwHighDateTime;
-
-        uli2.LowPart  = lpKernelTime.dwLowDateTime;
-        uli2.HighPart = lpKernelTime.dwHighDateTime;
-
-        uli3.LowPart  = lpUserTime.dwLowDateTime;
-        uli3.HighPart = lpUserTime.dwHighDateTime;
-
-        double a1 = uli2.QuadPart + uli3.QuadPart - uli1.QuadPart;
-        double a2 = uli2.QuadPart + uli3.QuadPart;
-
-        std::cout << "\n\nCPU Data" << std::endl;
-        std::cout << "Used: "<< std::fixed << std::setprecision(2) << (a1/a2)*100 << "%" << "\n\n";}
-    
-    else {std::cout << "Error with gathering CPU Data.";}
-
-    }
-};
-
-
-class CollectRAMData {
-
-    private: 
-        MEMORYSTATUSEX statex;
-    public:
-    CollectRAMData() {CollectRAMInfo();};
-
-    void CollectRAMInfo() {
-
-        statex.dwLength = sizeof (statex);
-    BOOL status2 = GlobalMemoryStatusEx (&statex);
-
-    if (status2) {
-        std::cout << "\n\nRAM Data" << std::endl;
-        std::cout << "Used: " << statex.dwMemoryLoad  << std::endl;
-        std::cout << "Total: " << statex.ullTotalPhys << std::endl;
-        std::cout << "Free: " << statex.ullAvailPhys;
-        }
-
-    else {std::cout << "Error with gathering RAM Data.";}
-
-    };
-
-};
-
-class CollectGPUData {
+class CollectAllData {
     private:
         PDH_HQUERY phQuery;
-        PDH_HCOUNTER phCounter;
-        DWORD lpdwBufferSize = 0;
-        DWORD lpdwItemCount = 0;
+        PDH_HCOUNTER phCounterCPUpercentage, phCounterDTpercentage, phCounterBYTESsent, phCounterBYTESreceived, phCounterGPUpercentage;
+        PDH_FMT_COUNTERVALUE valueCPUpercentage, valueDTpercentage, valueGPUpercentage, valueBYTESsent, valueBYTESreceived;
+        MEMORYSTATUSEX statex;
+        DWORD bufferGPUsize, bufferBYTESsentSIZE, bufferBYTESreceivedSIZE;
+        DWORD bufferGPUitemcount, bufferBYTESsentitemcount, bufferBYTESreceiveditemcount;
         double totalGPU = 0;
-    public: 
-        CollectGPUData() {CollectRAMInfo();};
+        double totalBYTESsent = 0;
+        double totalBYTESreceived = 0;
+    public:
+            CollectAllData() {CollectData();}
 
-    void CollectRAMInfo() {
+        void CollectData() {
+        
+    statex.dwLength = sizeof (statex);
+    BOOL status2 = GlobalMemoryStatusEx (&statex);
 
-PdhOpenQuery(NULL, 0, &phQuery);
-    PdhAddEnglishCounterW(phQuery, L"\\GPU Engine(*)\\Utilization Percentage", 0, &phCounter);
+    PdhOpenQuery(NULL, 0, &phQuery);
+    PdhAddEnglishCounterW(phQuery, L"\\Processor(_Total)\\% Processor Time", 0, &phCounterCPUpercentage);   // CPU usage
+    PdhAddEnglishCounterW(phQuery, L"\\PhysicalDisk(_Total)\\% Disk Time", 0, &phCounterDTpercentage);      // Disk Activity
+    PdhAddEnglishCounterW(phQuery, L"\\NBT Connection(*)\\Bytes Received/sec", 0, &phCounterBYTESreceived); // Bytes Received
+    PdhAddEnglishCounterW(phQuery, L"\\NBT Connection(*)\\Bytes Sent/sec", 0, &phCounterBYTESsent);         // Bytes Sent
+    PdhAddEnglishCounterW(phQuery, L"\\GPU Engine(*)\\Utilization Percentage", 0, &phCounterGPUpercentage); // Bytes Sent
     PdhCollectQueryData(phQuery);
-    Sleep(1000);
+    Sleep(500);
     PdhCollectQueryData(phQuery);
-    PdhGetFormattedCounterArrayW(phCounter, PDH_FMT_DOUBLE, &lpdwBufferSize, &lpdwItemCount, NULL);
+    PdhGetFormattedCounterValue(phCounterCPUpercentage, PDH_FMT_DOUBLE, NULL, &valueCPUpercentage);
+    PdhGetFormattedCounterValue(phCounterDTpercentage, PDH_FMT_DOUBLE, NULL, &valueDTpercentage);
+
+    PdhGetFormattedCounterArrayW(phCounterGPUpercentage, PDH_FMT_DOUBLE, &bufferGPUsize, &bufferGPUitemcount, NULL);
+    PdhGetFormattedCounterArrayW(phCounterBYTESsent, PDH_FMT_DOUBLE, &bufferBYTESsentSIZE, &bufferBYTESsentitemcount, NULL);
+    PdhGetFormattedCounterArrayW(phCounterBYTESreceived, PDH_FMT_DOUBLE, &bufferBYTESreceivedSIZE, &bufferBYTESreceiveditemcount, NULL);
+
+    std::vector<BYTE> bufferGPUpercentage(bufferGPUsize);
+    std::vector<BYTE> bufferBYTESsent(bufferBYTESsentSIZE);
+    std::vector<BYTE> bufferBYTESreceived(bufferBYTESreceivedSIZE);
+
+    auto itemsGPU = reinterpret_cast<PPDH_FMT_COUNTERVALUE_ITEM_W>(bufferGPUpercentage.data());
+    auto itemsBYESsent = reinterpret_cast<PPDH_FMT_COUNTERVALUE_ITEM_W>(bufferBYTESsent.data());
+    auto itemsBYESreceived = reinterpret_cast<PPDH_FMT_COUNTERVALUE_ITEM_W>(bufferBYTESreceived.data());
+
+    PdhGetFormattedCounterArrayW(phCounterGPUpercentage, PDH_FMT_DOUBLE, &bufferGPUsize, &bufferGPUitemcount, itemsGPU);
+    PdhGetFormattedCounterArrayW(phCounterBYTESsent, PDH_FMT_DOUBLE, &bufferBYTESsentSIZE, &bufferBYTESsentitemcount, itemsBYESsent);
+    PdhGetFormattedCounterArrayW(phCounterBYTESreceived, PDH_FMT_DOUBLE, &bufferBYTESreceivedSIZE, &bufferBYTESreceiveditemcount, itemsBYESreceived);
 
 
-    //needed because we get an arrays when requesting a counter(eg. GPU Engine(*))
-    std::vector<BYTE> buffer(lpdwBufferSize);
-    auto items =reinterpret_cast<PPDH_FMT_COUNTERVALUE_ITEM_W>(buffer.data());
-    PdhGetFormattedCounterArrayW(phCounter, PDH_FMT_DOUBLE, &lpdwBufferSize, &lpdwItemCount, items);
+    for (int i = 0; i < bufferGPUitemcount; i++) {totalGPU += itemsGPU[i].FmtValue.doubleValue;}
+    for (int i = 0; i < bufferBYTESsentitemcount; i++) {totalBYTESsent += itemsBYESsent[i].FmtValue.doubleValue;}
+    for (int i = 0; i < bufferBYTESreceiveditemcount; i++) {totalBYTESreceived += itemsBYESreceived[i].FmtValue.doubleValue;}
 
 
-    for (int i = 0; i < lpdwItemCount; i++) {totalGPU += items[i].FmtValue.doubleValue;}
-    //
+    std::cout << "CPU Usage: " << valueCPUpercentage.doubleValue << "%" << std::endl;
+    std::cout << "GPU Usage: " << totalGPU << "%" << std::endl;
+    std::cout << "Disk Activity Usage: " << valueDTpercentage.doubleValue << "%" << std::endl;
+    std::cout << "RAM Used: " << statex.dwMemoryLoad  << "%" << std::endl;
+    std::cout << "RAM Total: " << (statex.ullTotalPhys)/(1024*1024) << "MB" << std::endl;
+    std::cout << "RAM Free: " << (statex.ullAvailPhys)/(1024*1024) << "MB" << std::endl;;
+    std::cout << "Bytes Received: " << totalBYTESreceived << "bytes" << std::endl;
+    std::cout << "Bytes Sent: " << totalBYTESsent << "bytes" << std::endl;
 
-    std::cout << "GPU Usage: " << totalGPU << "%";
 
     PdhCloseQuery(phQuery);
-
+    
     }
+
 };
-
-
-
-
-
-
-
 
 
 int main() {
-    CollectRAMData collector0;
-    CollectCPUData collector1;
-    CollectGPUData collector2;
+    CollectAllData collector;
     return 0;
 }
