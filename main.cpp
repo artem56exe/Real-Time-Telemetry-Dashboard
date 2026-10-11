@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <pdh.h>
 #include <vector>
+#pragma comment(lib, "pdh.lib")
 
 
 class CollectAllData {
